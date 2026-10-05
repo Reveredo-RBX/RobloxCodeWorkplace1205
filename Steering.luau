@@ -16,10 +16,10 @@ local function StartLaunchAnim()
 	end
 
 	Launching = true
-	
+
 	local PlayerBase = workspace:WaitForChild("BaseTemplate")
 	--TODO Make the above use the players base
-	
+
 	local GroundSmoke = PlayerBase.Base.GroundSmoke.GroundSmoke
 	local Rocket = PlayerBase:FindFirstChild("Rocket")
 	if not Rocket or not Rocket.PrimaryCenter then
@@ -38,14 +38,14 @@ local function StartLaunchAnim()
 
 	FireVFX1.Enabled = true
 	FireVFX2.Enabled = true
-	
+
 	task.wait(1)
 
 	-- TODO: Confirm they are the player who owns this base 
 	local R_Power = UpgradesConfig:GetUpgrade("FuelPower", Player.upgrades.PowerLevel.Value)
 	local R_Fuel = UpgradesConfig:GetUpgrade("FuelCapacity", Player.upgrades.FuelLevel.Value)
 	local R_Steering = UpgradesConfig:GetUpgrade("Steering", Player.upgrades.SteeringLevel.Value)
-	
+
 	-- ENTER THE ROCKET AND TWEEN UP
 
 	local Character = Player.Character
@@ -120,13 +120,6 @@ local function StartLaunchAnim()
 	weld.Parent = HumanoidRootPart
 
 	-- =========================================================
-	-- FLIGHT REFERENCE ORIENTATION
-	-- =========================================================
-
-	local flightStartPivot = Rocket:GetPivot()
-	local baseRotation = flightStartPivot - flightStartPivot.Position
-
-	-- =========================================================
 	-- CUSTOM CAMERA
 	-- =========================================================
 
@@ -137,33 +130,20 @@ local function StartLaunchAnim()
 
 	Camera.CameraType = Enum.CameraType.Scriptable
 
-	local rocketPosition = Rocket.PrimaryCenter.Position
-
-	local cameraForward = Vector3.new(
-		baseRotation.LookVector.X,
-		0,
-		baseRotation.LookVector.Z
-	)
-
-	if cameraForward.Magnitude > 0 then
-		cameraForward = cameraForward.Unit
-	else
-		cameraForward = Vector3.new(0, 0, -1)
-	end
+	local rocketCF = Rocket.PrimaryCenter.CFrame
 
 	local cameraPosition =
-		rocketPosition
-		- cameraForward * 10
-		+ Vector3.new(0, -15, 0)
+		rocketCF.Position
+		+ rocketCF.UpVector * -15
+		+ rocketCF.LookVector * 10
 
 	local lookPosition =
-		rocketPosition
-		+ Vector3.new(0, 5, 0)
+		rocketCF.Position
+		+ rocketCF.UpVector * 5
 
 	local targetCameraCFrame = CFrame.lookAt(
 		cameraPosition,
-		lookPosition,
-		Vector3.yAxis
+		lookPosition
 	)
 
 	-- Start at the original camera position
@@ -193,27 +173,32 @@ local function StartLaunchAnim()
 			return
 		end
 
-		local rocketPosition = Rocket.PrimaryCenter.Position
+		local rocketCF = Rocket.PrimaryCenter.CFrame
 
 		local cameraPosition =
-			rocketPosition
-			- cameraForward * 10
-			+ Vector3.new(0, -15, 0)
+			rocketCF.Position
+			+ rocketCF.UpVector * -15
+			+ rocketCF.LookVector * 10
 
 		local lookPosition =
-			rocketPosition
-			+ Vector3.new(0, 5, 0)
+			rocketCF.Position
+			+ rocketCF.UpVector * 5
 
 		Camera.CFrame = CFrame.lookAt(
 			cameraPosition,
-			lookPosition,
-			Vector3.yAxis
+			lookPosition
 		)
 	end)
 
 	-- =========================================================
 	-- STAGE 3: ACTUAL ROCKET FLIGHT
 	-- =========================================================
+
+	-- The rocket's original orientation is captured once.
+	-- Movement is always calculated in WORLD space so tilt can
+	-- never affect the direction of travel.
+	local flightStartPivot = Rocket:GetPivot()
+	local baseRotation = flightStartPivot - flightStartPivot.Position
 
 	local verticalSpeed = 20 * R_Power.Value
 	local MAX_XZ_SPEED = 35
@@ -365,12 +350,18 @@ local function StartLaunchAnim()
 			return
 		end
 
+		-- -----------------------------------------------------
+		-- INPUT -> TARGET XZ VELOCITY
+		-- -----------------------------------------------------
+
 		local input = SteeringInput
 
 		if input.Magnitude > 1 then
 			input = input.Unit
 		end
 
+		-- Movement uses the rocket's original orientation.
+		-- This stays fixed while the rocket visually tilts.
 		local rocketForward = Vector3.new(
 			baseRotation.LookVector.X,
 			0,
@@ -391,11 +382,9 @@ local function StartLaunchAnim()
 			rocketRight = rocketRight.Unit
 		end
 
-		-- Correct the model's input axes:
-		-- W = forward, S = backward, A = left, D = right
 		local desiredDirection =
-			rocketForward * input.Y
-			+ rocketRight * input.X
+			rocketForward * -input.Y
+			+ rocketRight * -input.X
 
 		if desiredDirection.Magnitude > 1 then
 			desiredDirection = desiredDirection.Unit
@@ -403,6 +392,8 @@ local function StartLaunchAnim()
 
 		local targetVelocity = desiredDirection * MAX_XZ_SPEED
 
+		-- Steering ONLY changes acceleration. The maximum speed
+		-- is always MAX_XZ_SPEED.
 		local difference = targetVelocity - horizontalVelocity
 		local maxChange = acceleration * deltaTime
 
@@ -411,6 +402,10 @@ local function StartLaunchAnim()
 		elseif difference.Magnitude > 0 then
 			horizontalVelocity += difference.Unit * maxChange
 		end
+
+		-- -----------------------------------------------------
+		-- NO INPUT -> DECELERATE TO ZERO
+		-- -----------------------------------------------------
 
 		if input.Magnitude == 0 then
 			local deceleration = acceleration * deltaTime
@@ -422,16 +417,31 @@ local function StartLaunchAnim()
 			end
 		end
 
+		-- -----------------------------------------------------
+		-- VERTICAL FLIGHT
+		-- -----------------------------------------------------
+
+		-- Fuel Power controls vertical speed.
+		-- Fuel Capacity controls how long this loop runs.
 		local velocity = Vector3.new(
 			horizontalVelocity.X,
 			verticalSpeed,
 			horizontalVelocity.Z
 		)
 
-		local forwardVelocity = horizontalVelocity:Dot(rocketForward)
-		local rightVelocity = horizontalVelocity:Dot(rocketRight)
+		-- -----------------------------------------------------
+		-- VELOCITY-BASED TILT
+		-- -----------------------------------------------------
 
-		-- Pitch sign is inverted; roll is already correct.
+		-- Calculate tilt from WORLD-SPACE XZ velocity.
+		-- This deliberately does not use the rocket's current
+		-- rotation, preventing rotational feedback/spinning.
+		local forwardVelocity =
+			horizontalVelocity:Dot(rocketForward)
+
+		local rightVelocity =
+			horizontalVelocity:Dot(rocketRight)
+
 		local targetPitch = math.clamp(
 			forwardVelocity / MAX_XZ_SPEED * MAX_TILT,
 			-MAX_TILT,
@@ -449,13 +459,17 @@ local function StartLaunchAnim()
 		currentTiltX += (targetPitch - currentTiltX) * tiltAlpha
 		currentTiltZ += (targetRoll - currentTiltZ) * tiltAlpha
 
+		-- -----------------------------------------------------
+		-- APPLY MOVEMENT + VISUAL TILT
+		-- -----------------------------------------------------
+
 		local currentPosition = Rocket:GetPivot().Position
 		local newPosition = currentPosition + velocity * deltaTime
 
 		Rocket:PivotTo(
 			CFrame.new(newPosition)
-			* baseRotation
-			* CFrame.Angles(currentTiltX, 0, currentTiltZ)
+				* baseRotation
+				* CFrame.Angles(currentTiltX, 0, currentTiltZ)
 		)
 	end)
 
