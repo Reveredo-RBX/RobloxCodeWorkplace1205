@@ -394,8 +394,8 @@ local function StartLaunchAnim()
 		-- Correct the model's input axes:
 		-- W = forward, S = backward, A = left, D = right
 		local desiredDirection =
-			rocketForward * -input.Y
-			+ rocketRight * -input.X
+			rocketForward * input.Y
+			+ rocketRight * input.X
 
 		if desiredDirection.Magnitude > 1 then
 			desiredDirection = desiredDirection.Unit
