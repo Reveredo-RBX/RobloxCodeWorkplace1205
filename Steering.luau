@@ -120,6 +120,29 @@ local function StartLaunchAnim()
 	weld.Parent = HumanoidRootPart
 
 	-- =========================================================
+	-- STAGE 3: ACTUAL ROCKET FLIGHT
+	-- =========================================================
+
+	-- The rocket's original orientation is captured once.
+	-- Movement is always calculated in WORLD space so tilt can
+	-- never affect the direction of travel.
+	local flightStartPivot = Rocket:GetPivot()
+	local baseRotation = flightStartPivot - flightStartPivot.Position
+
+	local verticalSpeed = 20 * R_Power.Value
+	local MAX_XZ_SPEED = 35
+	local acceleration = 12 * R_Steering.Value
+	local MAX_TILT = math.rad(30)
+	local tiltSpeed = 8
+
+	local horizontalVelocity = Vector3.zero
+	local currentTiltX = 0
+	local currentTiltZ = 0
+	local flightStart = os.clock()
+	local fuelDuration = R_Fuel.Value
+	local flightFinished = false
+	
+	-- =========================================================
 	-- CUSTOM CAMERA
 	-- =========================================================
 
@@ -173,46 +196,37 @@ local function StartLaunchAnim()
 			return
 		end
 
-		local rocketCF = Rocket.PrimaryCenter.CFrame
+		local rocketPosition = Rocket.PrimaryCenter.Position
+
+		local cameraForward = Vector3.new(
+			baseRotation.LookVector.X,
+			0,
+			baseRotation.LookVector.Z
+		).Unit
 
 		local cameraPosition =
-			rocketCF.Position
-			+ rocketCF.UpVector * -15
-			+ rocketCF.LookVector * 10
+			rocketPosition
+		- cameraForward * 10
+			+ Vector3.new(0, -15, 0)
 
 		local lookPosition =
-			rocketCF.Position
-			+ rocketCF.UpVector * 5
+			rocketPosition
+			+ Vector3.new(0, 5, 0)
 
+		local targetCameraCFrame = CFrame.lookAt(
+			cameraPosition,
+			lookPosition,
+			Vector3.yAxis
+		)
+
+		-- Explicit world-up prevents the camera from rolling/flipping.
 		Camera.CFrame = CFrame.lookAt(
 			cameraPosition,
-			lookPosition
+			lookPosition,
+			Vector3.yAxis
 		)
 	end)
-
-	-- =========================================================
-	-- STAGE 3: ACTUAL ROCKET FLIGHT
-	-- =========================================================
-
-	-- The rocket's original orientation is captured once.
-	-- Movement is always calculated in WORLD space so tilt can
-	-- never affect the direction of travel.
-	local flightStartPivot = Rocket:GetPivot()
-	local baseRotation = flightStartPivot - flightStartPivot.Position
-
-	local verticalSpeed = 20 * R_Power.Value
-	local MAX_XZ_SPEED = 35
-	local acceleration = 12 * R_Steering.Value
-	local MAX_TILT = math.rad(30)
-	local tiltSpeed = 8
-
-	local horizontalVelocity = Vector3.zero
-	local currentTiltX = 0
-	local currentTiltZ = 0
-	local flightStart = os.clock()
-	local fuelDuration = R_Fuel.Value
-	local flightFinished = false
-
+	
 	-- =========================================================
 	-- STEERING INPUT
 	-- =========================================================
@@ -390,8 +404,8 @@ local function StartLaunchAnim()
 		-- D = right
 
 		local desiredDirection =
-			rocketForward * input.Y
-			+ rocketRight * input.X
+			rocketForward * -input.Y
+			+ rocketRight * -input.X
 
 		if desiredDirection.Magnitude > 1 then
 			desiredDirection = desiredDirection.Unit
